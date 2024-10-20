@@ -1,0 +1,57 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "10m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "indices": ["filebeat-*"],
+        "body": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                { "range": { "@timestamp": { "gte": "now-10m" } } },  // Adjust time window as needed
+                { "terms": { "host.name": ["server1", "server2", "server3", "server4"] } }
+              ],
+              "must_not": {
+                "match_phrase": {
+                  "message": "successfully sent"
+                }
+              }
+            }
+          },
+          "aggs": {
+            "servers": {
+              "terms": {
+                "field": "host.name",
+                "size": 10
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.aggregations.servers.buckets.length": {
+        "gt": 0
+      }
+    }
+  },
+  "actions": {
+    "email_admin": {
+      "email": {
+        "profile": "standard",
+        "to": ["admin@example.com"],  // Set the email recipient
+        "subject": "Warning: Log issue detected",
+        "body": {
+          "text": "The following servers have failed to send 'successfully sent' in their logs within the last 10 minutes: {{#ctx.payload.aggregations.servers.buckets}}{{key}} {{/ctx.payload.aggregations.servers.buckets}}"
+        }
+      }
+    }
+  }
+}
