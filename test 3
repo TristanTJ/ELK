@@ -1,0 +1,66 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "10m"  // Adjust the interval as necessary
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "indices": ["filebeat-*"],  // Use the correct index pattern for your Filebeat logs
+        "body": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                { "range": { "@timestamp": { "gte": "now-5d" } } },  // Last 5 days
+                { "terms": { "host.name": ["server1", "server2", "server3", "server4"] } },
+                { "match_phrase": { "message": "successfully sent" } }  // Search for the required text
+              ]
+            }
+          },
+          "aggs": {
+            "servers": {
+              "terms": {
+                "field": "host.name",
+                "size": 10
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "script": {
+      "source": """
+        // List of all servers to check
+        def servers = ['server1', 'server2', 'server3', 'server4'];
+        
+        // Get servers that have logs with 'successfully sent'
+        def foundServers = ctx.payload.aggregations.servers.buckets.stream().map(b -> b.key).collect(Collectors.toSet());
+        
+        // Identify servers that are missing the log message
+        def missingServers = servers.stream().filter(s -> !foundServers.contains(s)).collect(Collectors.toList());
+        
+        // Store missing servers in the context to be used in the email alert
+        ctx.payload.missing_servers = missingServers;
+        
+        // Trigger the alert if there are any missing servers
+        return missingServers.size() > 0;
+      """
+    }
+  },
+  "actions": {
+    "email_admin": {
+      "email": {
+        "profile": "standard",
+        "to": ["admin@example.com"],  // Set the email recipient
+        "subject": "Warning: Missing 'successfully sent' logs",
+        "body": {
+          "text": "The following servers did not log 'successfully sent' in the past 5 days: {{#ctx.payload.missing_servers}}{{.}} {{/ctx.payload.missing_servers}}"
+        }
+      }
+    }
+  }
+}
