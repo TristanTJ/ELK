@@ -1,0 +1,55 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "10m"  // Adjust the interval as necessary
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "indices": ["filebeat-*"],  // Use the correct index pattern for your Filebeat logs
+        "body": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                { "range": { "@timestamp": { "gte": "now-5d" } } },  // Last 5 days
+                { "terms": { "host.name": ["server1", "server2", "server3", "server4"] } },
+                { "match_phrase": { "message": "successfully sent" } }  // Search for the required text
+              ]
+            }
+          },
+          "aggs": {
+            "servers": {
+              "terms": {
+                "field": "host.name",
+                "size": 10
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "script": {
+      "source": """
+        def servers = ['server1', 'server2', 'server3', 'server4'];
+        def foundServers = ctx.payload.aggregations.servers.buckets.stream().map(b -> b.key).collect(Collectors.toSet());
+        return !servers.stream().allMatch(s -> foundServers.contains(s));
+      """
+    }
+  },
+  "actions": {
+    "email_admin": {
+      "email": {
+        "profile": "standard",
+        "to": ["admin@example.com"],  // Set the email recipient
+        "subject": "Warning: Missing 'successfully sent' logs",
+        "body": {
+          "text": "The following servers did not log 'successfully sent' in the past 5 days: {{#ctx.payload.aggregations.servers.buckets}}{{key}} {{/ctx.payload.aggregations.servers.buckets}}"
+        }
+      }
+    }
+  }
+}
